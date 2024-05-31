@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, send_file
+import pandas as pd
 import json
 from io import BytesIO
 
@@ -8,30 +9,35 @@ app = Flask(__name__)
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if not request.data:
-        return jsonify({"error": "No file provided"}), 400
-    data = request.data
-    if data:
-        parsed_data = parse_json(data)
-        return send_parsed_file(parsed_data)
+        return jsonify({"error": "No file part"}), 400
+    file = request.data
+    if file:
+        try:
+            df = pd.read_excel(file)
+            parsed_data = parse_excel(df)
+            return send_parsed_file(parsed_data)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
     return jsonify({"error": "File upload failed"}), 500
 
 
-def parse_json(data):
+def parse_excel(df):
     result = {}
-    json_data = json.loads(data)
-    for item in json_data:
-        service = item['Service']
-        check_id = item['Check ID'].split(' - ')[0]
-        region = item['Region']
-        arn = item['Check ID'].split(' - ')[1]
+    fail_rows = df[df['Status'] == 'FAIL']
+    for _, row in fail_rows.iterrows():
+        service = row['Service']
+        check_id = row['Check ID'].split(' - ')[0]
+        region = row['Region']
+        arn = row['Check ID'].split(' - ')[1]
+        severity = row['Severity']
 
         if service not in result:
             result[service] = {}
         if check_id not in result[service]:
-            result[service][check_id] = {}
-        if region not in result[service][check_id]:
-            result[service][check_id][region] = []
-        result[service][check_id][region].append(arn)
+            result[service][check_id] = {"severity": severity, "regions": {}}
+        if region not in result[service][check_id]["regions"]:
+            result[service][check_id]["regions"][region] = []
+        result[service][check_id]["regions"][region].append(arn)
     return result
 
 
